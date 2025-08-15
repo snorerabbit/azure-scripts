@@ -11,11 +11,19 @@ NSG="nsg-nestedvm"
 NIC="nic-nestedvm"
 VMNAME="vm-nested-4x16"
 VM_SIZE="Standard_D4s_v5"             # 4 vCPU / 16 GiB, supports nested virtualization
-IMAGE="MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition:latest"
+IMAGE="MicrosoftWindowsDesktop:windows-11:win11-22h2-ent-multisession:latest"
 ADMIN_USER="azureadmin"
 BASTION_NAME="bastion-nestedvm"
 BASTION_PIP="pip-bastion"
 # --------------------------------------
+
+# Rollback function
+rollback() {
+    echo "!!! ERROR detected. Rolling back by deleting resource group: $RG"
+    az group delete -n "$RG" --yes --no-wait
+    echo "Rollback triggered — resources are being deleted in the background."
+}
+trap rollback ERR
 
 echo "==> Creating resource group..."
 az group create -n "$RG" -l "$LOCATION" 1>/dev/null
@@ -27,7 +35,6 @@ az network vnet create \
   --subnet-name "$SUBNET" \
   --subnet-prefix 10.10.1.0/24 1>/dev/null
 
-# Add the AzureBastionSubnet with a minimum /27 prefix
 az network vnet subnet create \
   -g "$RG" \
   --vnet-name "$VNET" \
@@ -36,9 +43,6 @@ az network vnet subnet create \
 
 echo "==> Creating Network Security Group (NSG)..."
 az network nsg create -g "$RG" -n "$NSG" 1>/dev/null
-
-# No inbound RDP rules — Bastion will handle access
-# Only outbound rules remain as per Azure defaults
 
 echo "==> Creating NIC without public IP..."
 SUBNET_ID=$(az network vnet subnet show -g "$RG" --vnet-name "$VNET" -n "$SUBNET" --query id -o tsv)
@@ -55,7 +59,7 @@ if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
   echo
 fi
 
-echo "==> Creating the VM with no public IP..."
+echo "==> Creating the Windows 11 Enterprise Multi-Session VM (no public IP)..."
 az vm create \
   -g "$RG" -n "$VMNAME" \
   --size "$VM_SIZE" \
@@ -68,10 +72,10 @@ az vm create \
   --os-disk-delete-option Delete \
   --enable-vtpm true \
   --enable-secure-boot true \
-  --license-type Windows_Server \
+  --license-type Windows_Client \
   --tags purpose=nested-virt-demo 1>/dev/null
 
-# Enable accelerated networking if possible
+echo "==> Enabling accelerated networking if supported..."
 set +e
 az network nic update -g "$RG" -n "$NIC" --accelerated-networking true 1>/dev/null
 set -e
@@ -92,10 +96,10 @@ az network bastion create \
 BASTION_PUBLIC_IP=$(az network public-ip show -g "$RG" -n "$BASTION_PIP" --query ipAddress -o tsv)
 
 echo "============================================================"
-echo " VM deployed!"
+echo " Windows 11 Enterprise Multi-Session VM deployed!"
 echo " Name:            $VMNAME"
 echo " Size:            $VM_SIZE"
-echo " OS:              Windows Server 2022 Datacenter (Azure Edition)"
+echo " OS:              Windows 11 Enterprise Multi-Session (22H2)"
 echo " Resource Group:  $RG"
 echo " Location:        $LOCATION"
 echo " VM Public IP:    None (private only)"
